@@ -56,7 +56,7 @@ export class KnowledgeAnalyzer {
       'JWT / Authentication': /jwt|json.web.token|authentication|auth/i,
       'OAuth': /oauth|openid|sso|single.sign/i,
       'Database Design': /database|schema|migration|index|normaliz/i,
-      'API Design': /rest|graphql|api.endpoint|swagger|openapi/i,
+      'API Design': /rest|api.endpoint|swagger|openapi/i,
       'Encryption': /encrypt|decrypt|hash|bcrypt|cipher|tls|ssl/i,
       'Caching': /cache|redis|memcache|cdn|stale.while/i,
       'Concurrency': /async|parallel|thread|race.condition|mutex|lock/i,
@@ -101,13 +101,11 @@ export class KnowledgeAnalyzer {
       m.content.toLowerCase().includes(keyword)
     );
 
-    // Check if the user discussed tradeoffs
-    const discussedTradeoffs = allUserText.includes('tradeoff') ||
-      allUserText.includes('vs') ||
-      allUserText.includes('pros') ||
-      allUserText.includes('cons') ||
-      allUserText.includes('advantage') ||
-      allUserText.includes('disadvantage');
+    // Check if the user discussed tradeoffs — scoped to messages containing this concept's keyword
+    const discussedTradeoffs = userMessages.some(m => {
+      const lower = m.content.toLowerCase();
+      return lower.includes(keyword) && /tradeoff|vs|pros|cons|advantage|disadvantage/.test(lower);
+    });
 
     // Gap type 1: User used concept without deep engagement
     const userUsedConcept = allUserText.includes(keyword);
@@ -223,10 +221,11 @@ export class KnowledgeAnalyzer {
       ],
     };
 
+    const currentYear = new Date().getFullYear();
     return reads[concept] || [
       {
         title: `Search: ${concept} best practices`,
-        url: `https://www.google.com/search?q=${encodeURIComponent(concept + ' best practices 2024')}`,
+        url: `https://www.google.com/search?q=${encodeURIComponent(concept + ' best practices ' + currentYear)}`,
         type: 'article',
         description: `Find current best practices for ${concept}`
       }

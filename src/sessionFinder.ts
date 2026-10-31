@@ -44,8 +44,8 @@ export class SessionFinder {
         if (data.kind === 'interactive' && data.status === 'busy') {
           sessions.push(data);
         }
-      } catch {
-        // Skip malformed files
+      } catch (e) {
+        console.debug('Skipping malformed session file:', e instanceof Error ? e.message : e);
       }
     }
 
@@ -64,11 +64,13 @@ export class SessionFinder {
     if (workspacePath) {
       const matching = sessions.find(s => s.cwd === workspacePath);
       if (matching) return matching;
+    } else if (sessions.length === 1) {
+      // Only one session active and no workspace — use it
+      return sessions[0];
     }
 
-    // Otherwise return the most recently started
-    sessions.sort((a, b) => b.startedAt - a.startedAt);
-    return sessions[0];
+    // Multiple sessions and no workspace match — return null so caller can prompt
+    return null;
   }
 
   /**
@@ -77,8 +79,8 @@ export class SessionFinder {
   getConversationPath(session: SessionMeta): string | null {
     // Convert cwd to the directory name format Claude uses
     // /home/user/wispr_chall -> -home-user-wispr-chall
-    // Claude replaces BOTH / and _ with -, keeping leading -
-    const encoded = '-' + session.cwd.slice(1).replace(/[\/_]/g, '-');
+    // Claude replaces /, _, and spaces with -, keeping leading -
+    const encoded = '-' + session.cwd.slice(1).replace(/[\/_\s]/g, '-');
 
     const projectDir = path.join(
       os.homedir(),

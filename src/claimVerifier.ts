@@ -17,28 +17,26 @@ export interface VerificationResult {
  * Uses `claude -p` with the user's existing Claude Code setup —
  * no additional API keys needed.
  */
+const MAX_CLAIMS_PER_BATCH = 25;
+
 export class ClaimVerifier {
-  private useCLI: boolean;
-  private apiKey?: string;
-
-  constructor(useCLI = true, apiKey?: string) {
-    this.useCLI = useCLI;
-    this.apiKey = apiKey;
-  }
-
   /**
-   * Verify a batch of decisions
+   * Verify a batch of decisions using Claude CLI.
+   * Large batches are split to avoid timeouts and buffer limits.
    */
   async verify(decisions: Decision[]): Promise<VerificationResult[]> {
     if (decisions.length === 0) {
       return [];
     }
 
-    if (this.useCLI) {
-      return this.verifyViaCLI(decisions);
-    } else {
-      return this.verifyViaAPI(decisions);
+    // Process in batches to keep prompts manageable
+    const results: VerificationResult[] = [];
+    for (let i = 0; i < decisions.length; i += MAX_CLAIMS_PER_BATCH) {
+      const batch = decisions.slice(i, i + MAX_CLAIMS_PER_BATCH);
+      const batchResults = await this.verifyViaCLI(batch);
+      results.push(...batchResults);
     }
+    return results;
   }
 
   /**
@@ -73,7 +71,7 @@ CLAIM 1: incorrect | FISM was published in 2013 by Kabbur et al., not 2024 by He
       fs.writeFileSync(tmpFile, prompt);
 
       const result = execSync(
-        `claude -p "$(cat ${tmpFile})" --bare`,
+        `claude -p "$(cat '${tmpFile}')" --bare`,
         { timeout: 120000, maxBuffer: 10 * 1024 * 1024 }
       ).toString();
 
@@ -88,56 +86,6 @@ CLAIM 1: incorrect | FISM was published in 2013 by Kabbur et al., not 2024 by He
     } finally {
       // Always clean up the temp file
       try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
-    }
-  }
-
-  /**
-   * Verify claims using Claude API directly (if user provides key)
-   */
-  private async verifyViaAPI(decisions: Decision[]): Promise<VerificationResult[]> {
-    if (!this.apiKey) {
-      return decisions.map(d => ({
-        decision: d,
-        status: 'unverifiable' as const,
-        detail: 'No API key configured'
-      }));
-    }
-
-    const claimsList = decisions
-      .map((d, i) => `${i + 1}. "${d.claim}"`)
-      .join('\n');
-
-    const prompt = `Verify these software development claims. For each, respond with: status (verified/stale/incorrect/unverifiable), detail, alternatives.
-
-Claims:
-${claimsList}
-
-Respond as JSON array: [{"index": 1, "status": "...", "detail": "...", "alternatives": [...]}]`;
-
-    try {
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': this.apiKey,
-          'anthropic-version': '2023-06-01'
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 4096,
-          messages: [{ role: 'user', content: prompt }]
-        })
-      });
-
-      const data: any = await response.json();
-      const text = data.content?.[0]?.text || '';
-      return this.parseVerificationResponse(text, decisions);
-    } catch (error) {
-      return decisions.map(d => ({
-        decision: d,
-        status: 'unverifiable' as const,
-        detail: `API call failed: ${error instanceof Error ? error.message : 'unknown'}`
-      }));
     }
   }
 
@@ -178,7 +126,7 @@ Respond as JSON array: [{"index": 1, "status": "...", "detail": "...", "alternat
     if (lines.length === 0) return [];
 
     return lines.map(line => {
-      const match = line.trim().match(/^CLAIM\s+(\d+)\s*:\s*(\w+)\s*\|\s*(.*?)(?:\s*\|\s*alternates?:\s*(.*))?$/i);
+      const match = line.trim().match(/^CLAIM\s+(\d+)\s*:\s*([a-z]+)\s*\|\s*(.+?)(?:\s*\|\s*alternates?:\s*(.*))?$/i);
       if (!match) return null;
 
       const idx = parseInt(match[1]) - 1;
@@ -186,11 +134,14 @@ Respond as JSON array: [{"index": 1, "status": "...", "detail": "...", "alternat
       const detail = match[3].trim();
       const alternatives = match[4] ? match[4].split(',').map(s => s.trim()) : [];
 
+      const validStatuses = ['verified', 'stale', 'incorrect', 'unverifiable'] as const;
+      const parsedStatus = validStatuses.includes(status as any)
+        ? (status as VerificationResult['status'])
+        : 'unverifiable';
+
       return {
         decision: decisions[idx] || decisions[0],
-        status: ['verified', 'stale', 'incorrect', 'unverifiable'].includes(status)
-          ? status as any
-          : 'unverifiable',
+        status: parsedStatus,
         detail,
         alternatives
       };
@@ -229,12 +180,16 @@ Respond as JSON array: [{"index": 1, "status": "...", "detail": "...", "alternat
   /**
    * Parse a JSON array of verification results
    */
-  private parseJSONArray(arr: any[], decisions: Decision[]): VerificationResult[] {
-    return arr.map((item: any, i: number) => ({
-      decision: decisions[item.index - 1] || decisions[item.index] || decisions[i],
-      status: item.status || 'unverifiable',
-      detail: item.detail || 'No detail provided',
-      alternatives: item.alternatives || []
-    }));
+  private parseJSONArray(arr: unknown[], decisions: Decision[]): VerificationResult[] {
+    return arr.map((value: unknown, i: number) => {
+      const item = value as Record<string, unknown>;
+      const idx = typeof item.index === 'number' ? item.index : i;
+      return {
+        decision: decisions[idx - 1] ?? decisions[idx] ?? decisions[i],
+        status: (typeof item.status === 'string' ? item.status : 'unverifiable') as VerificationResult['status'],
+        detail: typeof item.detail === 'string' ? item.detail : 'No detail provided',
+        alternatives: Array.isArray(item.alternatives) ? item.alternatives as string[] : []
+      };
+    });
   }
 }

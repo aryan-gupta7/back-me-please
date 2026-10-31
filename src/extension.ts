@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { SessionFinder } from './sessionFinder';
-import { ConversationReader } from './conversationReader';
+import { ConversationReader, ParsedConversation } from './conversationReader';
 import { DecisionExtractor } from './decisionExtractor';
 import { ClaimVerifier } from './claimVerifier';
 import { KnowledgeAnalyzer } from './knowledgeAnalyzer';
@@ -32,13 +32,27 @@ export function activate(context: vscode.ExtensionContext) {
       try {
         // Step 1: Find the current session
         const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        const session = sessionFinder.getSessionForWorkspace(workspacePath);
+        let session = sessionFinder.getSessionForWorkspace(workspacePath);
 
         if (!session) {
-          panel.showError(
-            'No active Claude Code session found. Make sure Claude Code is running in this workspace.'
-          );
-          return;
+          // Multiple sessions active and no workspace match — let user pick
+          const allSessions = sessionFinder.getActiveSessions();
+          if (allSessions.length > 1) {
+            const picked = await vscode.window.showQuickPick(
+              allSessions.map(s => ({
+                label: `$(terminal) ${s.cwd}`,
+                description: `Started ${new Date(s.startedAt).toLocaleTimeString()}`,
+                session: s
+              }))
+            );
+            if (!picked) return;
+            session = picked.session;
+          } else {
+            panel.showError(
+              'No active Claude Code session found. Make sure Claude Code is running in this workspace.'
+            );
+            return;
+          }
         }
 
         // Step 2: Read the conversation
@@ -59,36 +73,9 @@ export function activate(context: vscode.ExtensionContext) {
           return;
         }
 
-        // Step 3: Extract decisions
-        panel.showLoading(`Extracting decisions from ${conversation.messages.length} messages...`);
-        const decisions = decisionExtractor.extract(conversation.messages);
+        // Steps 3-6: Run the audit pipeline
+        await runAuditPipeline(panel, conversation, decisionExtractor, knowledgeAnalyzer);
 
-        // Step 4: Verify claims
-        panel.showLoading(`Verifying ${decisions.length} claims...`);
-        const verifier = new ClaimVerifier(true); // Use CLI
-        const verifications = await verifier.verify(decisions);
-
-        // Step 5: Analyze knowledge gaps
-        panel.showLoading('Analyzing knowledge gaps...');
-        const gaps = knowledgeAnalyzer.analyze(conversation.messages);
-
-        // Step 6: Display results
-        panel.updateResults(conversation, verifications, gaps);
-
-        // Show summary notification
-        const flagged = verifications.filter(
-          v => v.status === 'stale' || v.status === 'incorrect'
-        ).length;
-
-        if (flagged > 0) {
-          vscode.window.showWarningMessage(
-            `Audit complete: ${flagged} claim${flagged > 1 ? 's' : ''} need${flagged === 1 ? 's' : ''} attention.`
-          );
-        } else {
-          vscode.window.showInformationMessage(
-            `Audit complete: All ${verifications.length} claims verified. ✅`
-          );
-        }
       } catch (error) {
         panel.showError(
           `Audit failed: ${error instanceof Error ? error.message : 'unknown error'}`
@@ -98,6 +85,47 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(openPanelCmd, runAuditCmd);
+}
+
+/**
+ * Run the full audit pipeline on a parsed conversation.
+ */
+async function runAuditPipeline(
+  panel: SidebarPanel,
+  conversation: ParsedConversation,
+  decisionExtractor: DecisionExtractor,
+  knowledgeAnalyzer: KnowledgeAnalyzer
+) {
+  // Step 3: Extract decisions
+  panel.showLoading(`Extracting decisions from ${conversation.messages.length} messages...`);
+  const decisions = decisionExtractor.extract(conversation.messages);
+
+  // Step 4: Verify claims
+  panel.showLoading(`Verifying ${decisions.length} claims...`);
+  const verifier = new ClaimVerifier();
+  const verifications = await verifier.verify(decisions);
+
+  // Step 5: Analyze knowledge gaps
+  panel.showLoading('Analyzing knowledge gaps...');
+  const gaps = knowledgeAnalyzer.analyze(conversation.messages);
+
+  // Step 6: Display results
+  panel.updateResults(conversation, verifications, gaps);
+
+  // Show summary notification
+  const flagged = verifications.filter(
+    v => v.status === 'stale' || v.status === 'incorrect'
+  ).length;
+
+  if (flagged > 0) {
+    vscode.window.showWarningMessage(
+      `Audit complete: ${flagged} claim${flagged > 1 ? 's' : ''} need${flagged === 1 ? 's' : ''} attention.`
+    );
+  } else {
+    vscode.window.showInformationMessage(
+      `Audit complete: All ${verifications.length} claims verified. ✅`
+    );
+  }
 }
 
 export function deactivate() {}

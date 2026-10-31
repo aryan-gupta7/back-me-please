@@ -10,6 +10,7 @@ export class SidebarPanel {
   public static currentPanel: SidebarPanel | undefined;
   private readonly panel: vscode.WebviewPanel;
   private disposables: vscode.Disposable[] = [];
+  private isUpdating = false;
 
   private constructor(
     panel: vscode.WebviewPanel,
@@ -44,14 +45,21 @@ export class SidebarPanel {
   }
 
   /**
-   * Update the panel with audit results
+   * Update the panel with audit results.
+   * Guards against concurrent audits overwriting each other.
    */
   updateResults(
     conversation: ParsedConversation,
     verifications: VerificationResult[],
     knowledgeGaps: KnowledgeGap[]
   ) {
-    this.panel.webview.html = this.getResultsHTML(conversation, verifications, knowledgeGaps);
+    if (this.isUpdating) return;
+    this.isUpdating = true;
+    try {
+      this.panel.webview.html = this.getResultsHTML(conversation, verifications, knowledgeGaps);
+    } finally {
+      this.isUpdating = false;
+    }
   }
 
   /**
@@ -377,7 +385,7 @@ export class SidebarPanel {
         <div class="detail">${this.escapeHtml(v.detail)}</div>
         ${v.alternatives && v.alternatives.length > 0 ? `
           <div class="alternatives">
-            <strong>Alternatives:</strong> ${v.alternatives.join(', ')}
+            <strong>Alternatives:</strong> ${v.alternatives.map(a => this.escapeHtml(a)).join(', ')}
           </div>
         ` : ''}
       </div>

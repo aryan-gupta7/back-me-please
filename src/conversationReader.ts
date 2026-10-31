@@ -67,8 +67,9 @@ export class ConversationReader {
             });
           }
         }
-      } catch {
-        // Skip malformed lines
+      } catch (e) {
+        // Skip malformed lines — log for debugging
+        console.debug('Skipping malformed JSONL line:', e instanceof Error ? e.message : e);
       }
     }
 
@@ -86,6 +87,8 @@ export class ConversationReader {
    * Extract text content from a message object (handles various formats)
    */
   private extractText(message: any): string {
+    if (!message || typeof message !== 'object') return '';
+    if (typeof message === 'string') return message;
     if (!message.content) return '';
 
     if (typeof message.content === 'string') {
@@ -102,34 +105,4 @@ export class ConversationReader {
     return '';
   }
 
-  /**
-   * Get a summary of the conversation (first and last few messages)
-   */
-  getSummary(conv: ParsedConversation): string {
-    const lines: string[] = [];
-    lines.push(`Session: ${conv.sessionId.slice(0, 8)}...`);
-    lines.push(`Project: ${conv.projectPath}`);
-    lines.push(`Messages: ${conv.totalMessages} (${conv.userMessages} user, ${conv.assistantMessages} assistant)`);
-    lines.push('');
-
-    // Show first 3 messages
-    lines.push('--- Start of conversation ---');
-    for (const msg of conv.messages.slice(0, 3)) {
-      const preview = msg.content.slice(0, 200).replace(/\n/g, ' ');
-      lines.push(`[${msg.role}] ${preview}${msg.content.length > 200 ? '...' : ''}`);
-    }
-
-    if (conv.messages.length > 6) {
-      lines.push(`... (${conv.messages.length - 6} more messages) ...`);
-    }
-
-    // Show last 3 messages
-    lines.push('--- End of conversation ---');
-    for (const msg of conv.messages.slice(-3)) {
-      const preview = msg.content.slice(0, 200).replace(/\n/g, ' ');
-      lines.push(`[${msg.role}] ${preview}${msg.content.length > 200 ? '...' : ''}`);
-    }
-
-    return lines.join('\n');
-  }
 }

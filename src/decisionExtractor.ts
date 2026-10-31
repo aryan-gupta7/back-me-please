@@ -12,9 +12,9 @@ export interface Decision {
 const TECH_INDICATORS = [
   'algorithm', 'library', 'framework', 'package', 'tool', 'database',
   'server', 'api', 'protocol', 'language', 'runtime', 'compiler',
-  'model', 'method', 'approach', 'pattern', 'architecture', 'library',
+  'model', 'method', 'approach', 'pattern', 'architecture',
   'module', 'component', 'service', 'stack', 'platform', 'engine',
-  'recommendation', 'alternative', 'migration', 'upgrade', 'replace',
+  'alternative', 'migration', 'upgrade', 'replace',
   'neural', 'transformer', 'embedding', 'vector', 'index', 'cache',
   'auth', 'encrypt', 'token', 'session', 'middleware', 'routing',
   'graphql', 'rest', 'grpc', 'websocket', 'docker', 'kubernetes',
@@ -73,8 +73,8 @@ export class DecisionExtractor {
     const claim = d.claim.trim();
     const words = claim.split(/\s+/);
 
-    // Must have at least 4 words (e.g. "MongoDB is better than PostgreSQL")
-    if (words.length < 4) return false;
+    // Must have at least 3 words (e.g. "JWT supports OAuth2")
+    if (words.length < 3) return false;
 
     // Must not be just a verb phrase without a subject
     const firstWord = words[0].toLowerCase();
@@ -101,24 +101,17 @@ export class DecisionExtractor {
   }
 
   /**
-   * Clean up a claim: trim leading conjunctions/prepositions, normalize whitespace
+   * Clean up a claim: trim leading/trailing conjunctions, normalize whitespace.
+   * Does NOT truncate to first capital letter — that destroys valid claims.
    */
   private cleanClaim(d: Decision): Decision {
     let claim = d.claim.trim();
     // Normalize whitespace
     claim = claim.replace(/\s+/g, ' ');
     // Remove leading conjunctions/prepositions that indicate mid-sentence capture
-    claim = claim.replace(/^(and|or|but|so|it|its|is|are|was|this|that|its)\s+/i, '');
+    claim = claim.replace(/^(and|or|but|so|it|its|is|are|was|this|that)\s+/i, '');
     // Remove trailing conjunctions/prepositions
     claim = claim.replace(/\s+(and|or|but|so|it|its|is|are|was|this|that)$/i, '');
-    // Must start with a capital letter (proper noun/technology) or be a complete sentence
-    if (!/^[A-Z]/.test(claim)) {
-      // Try to find the first capitalized word and start from there
-      const capMatch = claim.match(/[A-Z]/);
-      if (capMatch && capMatch.index) {
-        claim = claim.slice(capMatch.index);
-      }
-    }
     return { ...d, claim };
   }
 
@@ -145,7 +138,6 @@ export class DecisionExtractor {
     // Pattern 1: Temporal claims — "TechnologyName (2024)" or "Name (Author et al., 2024)"
     const temporalPatterns = [
       /([A-Z][\w]*(?:\s+[\w]+){0,4})\s*\((?:[\w\s,\.]+\s+)?(\d{4})\)/g,  // "FISM (2024)" or "FISM (He et al., 2024)"
-      /(released|introduced|published|launched|announced)\s+(in\s+)?(\d{4})/gi,  // "released in 2024"
       /(\d{4})\s+(version|release|paper|model)/gi,  // "2024 version"
     ];
 
@@ -166,7 +158,7 @@ export class DecisionExtractor {
     // Only match proper nouns (capitalized tech names) on both sides
     const comparisonPatterns = [
       /([A-Z][\w]*(?:\s+[A-Z][\w]*)*)\s+(is\s+)?(better|faster|more\s+\w+|preferred|recommended)\s+(than|over)\s+([A-Z][\w]*(?:\s+[A-Z][\w]*)*)/g,
-      /use\s+([A-Z][\w]*(?:\s+[A-Z][\w]*)*)\s+(instead|rather than|over)\s+([A-Z][\w]*(?:\s+[A-Z][\w]*)*)/gi,
+      /use\s+([A-Z][\w]*(?:\s+[A-Z][\w]*)*)\s+(instead|rather than|over)\s+([A-Z][\w]*(?:\s+[A-Z][\w]*)*)/g,
     ];
 
     for (const pattern of comparisonPatterns) {
@@ -183,27 +175,33 @@ export class DecisionExtractor {
     }
 
     // Pattern 3: Recommendation claims — "you should use X" / "I recommend X"
-    const recommendationPatterns = [
-      /(you\s+should\s+use|i\s+recommend|i'?d\s+recommend|best\s+to\s+use|let'?s\s+use|we'?ll\s+use)\s+(?:using\s+)?([A-Z][\w]*(?:\s+[A-Z][\w]*)*)/gi,
-      /(the\s+)?(best|optimal|ideal|right)\s+(choice|option|tool|library|framework)\s+(is|for)\s+([A-Z][\w]*(?:\s+[A-Z][\w]*)*)/gi,
-    ];
+    // Each pattern handled separately because capture group indices differ
+    const recPattern1 = /(you\s+should\s+use|i\s+recommend|i'?d\s+recommend|best\s+to\s+use|let'?s\s+use|we'?ll\s+use)\s+(?:using\s+)?([A-Z][\w]*(?:\s+[A-Z][\w]*)*)/g;
+    const recPattern2 = /(the\s+)?(best|optimal|ideal|right)\s+(choice|option|tool|library|framework)\s+(is|for)\s+([A-Z][\w]*(?:\s+[A-Z][\w]*)*)/gi;
 
-    for (const pattern of recommendationPatterns) {
-      let match;
-      while ((match = pattern.exec(text)) !== null) {
-        decisions.push({
-          claim: match[0],
-          context: this.getContext(text, match.index),
-          technology: match[2] || match[0],
-          claimType: 'recommendation',
-          confidence: 'high'
-        });
-      }
+    let match;
+    while ((match = recPattern1.exec(text)) !== null) {
+      decisions.push({
+        claim: match[0],
+        context: this.getContext(text, match.index),
+        technology: match[2] || match[0],
+        claimType: 'recommendation',
+        confidence: 'high'
+      });
+    }
+    while ((match = recPattern2.exec(text)) !== null) {
+      decisions.push({
+        claim: match[0],
+        context: this.getContext(text, match.index),
+        technology: match[5] || match[0],
+        claimType: 'recommendation',
+        confidence: 'high'
+      });
     }
 
     // Pattern 4: Capability claims — "X supports Y" (verb immediately after tech name)
     const capabilityPatterns = [
-      /([A-Z][\w]*(?:\s+[A-Z][\w]*)*)\s+(supports?|provides?|enables?|allows?|offers?)\s+([\w\s]+)/gi,
+      /([A-Z][\w]*(?:\s+[A-Z][\w]*)*)\s+(supports?|provides?|enables?|allows?|offers?)\s+([\w\s]+)/g,
     ];
 
     for (const pattern of capabilityPatterns) {
