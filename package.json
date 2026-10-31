@@ -1,0 +1,60 @@
+{
+  "name": "wispr-audit",
+  "displayName": "Wispr Audit",
+  "description": "Audit your LLM's decisions — verify claims, catch stale info, close knowledge gaps",
+  "version": "0.1.0",
+  "license": "MIT",
+  "publisher": "wispr-challenge",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": ["Other", "Machine Learning", "Education"],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "wisprAudit.openPanel",
+        "title": "Open Audit Panel",
+        "icon": "$(search)"
+      },
+      {
+        "command": "wisprAudit.runAudit",
+        "title": "Run Audit",
+        "icon": "$(play)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "wisprAudit",
+          "title": "Wispr Audit",
+          "icon": "$(shield)"
+        }
+      ]
+    },
+    "views": {
+      "wisprAudit": [
+        {
+          "type": "webview",
+          "id": "wisprAudit.panel",
+          "name": "Audit",
+          "icon": "$(shield)"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "vscode:prepublish": "npm run compile",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.80.0",
+    "typescript": "^5.0.0",
+    "@vscode/vsce": "^2.20.0"
+  }
+}

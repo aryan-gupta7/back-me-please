@@ -1,0 +1,23 @@
+# Build output
+out/
+
+# Dependencies
+node_modules/
+
+# VS Code extension package
+*.vsix
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode-test/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Temp files
+*.tmp
+wispr-audit-*.txt
